@@ -37,7 +37,7 @@ import schema_utils
 
 SOURCE_DIR = "source"
 SPEC_DIR = "spec"
-REQUEST_OPERATIONS = ["create", "update"]
+REQUEST_OPERATIONS = ["create", "update", "complete"]
 UCP_ANNOTATIONS = {"ucp_request", "ucp_response", "ucp_shared_request"}
 
 # Valid annotation values
