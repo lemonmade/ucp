@@ -79,9 +79,9 @@
           "schema": {"type": "string"}
         },
         {
-          "name": "payment",
+          "name": "checkout",
           "required": false,
-          "schema": {"$ref": "https://ucp.dev/schemas/shopping/payment.json"}
+          "schema": {"$ref": "https://ucp.dev/schemas/shopping/checkout.json"}
         },
         {
           "name": "idempotency_key",
