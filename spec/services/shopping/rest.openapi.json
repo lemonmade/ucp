@@ -255,7 +255,7 @@
               "schema": {
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/payment_data"
+                    "$ref": "#/components/schemas/checkout_complete_request"
                   },
                   {
                     "title": "Risk Signals",
@@ -539,9 +539,6 @@
     "schemas": {
       "order": {
         "$ref": "https://ucp.dev/schemas/shopping/order.json"
-      },
-      "payment_data": {
-        "$ref": "https://ucp.dev/schemas/shopping/payment_data.json"
       },
       "ucp": {
         "$ref": "https://ucp.dev/schemas/ucp.json"

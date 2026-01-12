@@ -1925,10 +1925,3 @@ export declare interface PlatformOrderConfig {
   webhook_url: string;
   [k: string]: unknown;
 }
-/**
- * The data that will used to submit payment to the merchant.
- */
-export declare interface PaymentData {
-  payment_data: PaymentInstrument;
-  [k: string]: unknown;
-}
