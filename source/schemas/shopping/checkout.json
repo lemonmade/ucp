@@ -125,7 +125,13 @@
     },
     "risk_signals": {
       "type": "object",
-      "description": "Key-value pairs of risk signals."
+      "description": "Key-value pairs of risk signals.",
+      "ucp_request": {
+        "create": "omit",
+        "update": "omit",
+        "complete": "optional"
+      },
+      "ucp_response": "omit"
     }
   }
 }
