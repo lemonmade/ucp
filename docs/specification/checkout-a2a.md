@@ -355,21 +355,30 @@ about verification and processing of the mandates to complete the checkout.
       {
         "kind": "data",
         "data": {
-          "a2a.ucp.checkout.payment_data": {
-            "id": "instr_1",
-            "handler_id": "gpay",
-            "type": "card",
-            "description": "Visa •••• 1234",
-            "billing_address": {
-              "street_address": "123 Main St",
-              "address_locality": "Anytown",
-              "address_region": "CA",
-              "address_country": "US",
-              "postal_code": "12345"
+          "a2a.ucp.checkout": {
+            "payment": {
+              "instruments": [
+                {
+                  "id": "instr_1",
+                  "handler_id": "gpay",
+                  "type": "card",
+                  "description": "Visa •••• 1234",
+                  "billing_address": {
+                    "street_address": "123 Main St",
+                    "address_locality": "Anytown",
+                    "address_region": "CA",
+                    "address_country": "US",
+                    "postal_code": "12345"
+                  },
+                  "credential": {
+                    "type": "PAYMENT_GATEWAY",
+                    "token": "examplePaymentMethodToken"
+                  }
+                }
+              ]
             },
-            "credential": {
-              "type": "PAYMENT_GATEWAY",
-              "token": "examplePaymentMethodToken"
+            "risk_signals": {
+               //... risk signal related data
             }
           },
           "ap2": {

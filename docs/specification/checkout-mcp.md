@@ -541,6 +541,7 @@ Maps to the [Complete Checkout](checkout.md#complete-checkout) operation.
 *   `id` (String): The ID of the checkout session.
 *   `payment` ([Payment](checkout.md#payment), Optional): Payment instrument instance submitted
     by the buyer.
+*   `risk_signals`([Risk Signals](checkout.md#risk_signals), Optional): Checkout Risk Signals  
 *   `idempotency_key` (String, UUID): **Required**. Unique key for retry
     safety.
 

@@ -253,22 +253,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/checkout_complete_request"
-                  },
-                  {
-                    "title": "Risk Signals",
-                    "description": "Optional risk signals for fraud detection.",
-                    "type": "object",
-                    "properties": {
-                      "risk_signals": {
-                        "type": "object",
-                        "description": "Key-value pairs of risk signals."
-                      }
-                    }
-                  }
-                ]
+                "$ref": "#/components/schemas/checkout_complete_request"
               }
             }
           }

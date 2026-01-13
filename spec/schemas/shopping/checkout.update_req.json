@@ -34,6 +34,10 @@
     },
     "payment": {
       "$ref": "payment.update_req.json"
+    },
+    "risk_signals": {
+      "type": "object",
+      "description": "Key-value pairs of risk signals."
     }
   }
 }

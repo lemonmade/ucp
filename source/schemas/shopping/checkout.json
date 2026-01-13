@@ -122,6 +122,10 @@
       "$ref": "types/order_confirmation.json",
       "description": "Details about an order created for this checkout session.",
       "ucp_request": "omit"
+    },
+    "risk_signals": {
+      "type": "object",
+      "description": "Key-value pairs of risk signals."
     }
   }
 }
