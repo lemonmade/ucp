@@ -18,7 +18,10 @@
     },
     "selected_instrument_id": {
       "type": "string",
-      "description": "The id of the currently selected payment instrument from the instruments array. Set by the agent when submitting payment, and echoed back by the merchant in finalized state."
+      "description": "The id of the currently selected payment instrument from the instruments array. Set by the agent when submitting payment, and echoed back by the merchant in finalized state.",
+      "ucp_request": {
+        "complete": "omit"
+      }
     },
     "instruments": {
       "type": "array",

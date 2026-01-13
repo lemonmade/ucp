@@ -66,6 +66,28 @@ def get_visibility(prop: Any, operation: Optional[str]) -> tuple[str, bool]:
     return ("omit" if prop.get("ucp_response") == "omit" else "include"), False
 
 
+def is_operation_omitted(data: Any, operation: str) -> bool:
+  """Returns True if operation is omitted at root or via all-omit properties."""
+  vis, _ = get_visibility(data, operation)
+  if vis == "omit":
+    return True
+
+  if isinstance(data, dict) and "properties" in data:
+    props = data["properties"]
+    # If properties exist (is a dict) and are not empty
+    if isinstance(props, dict) and props:
+      has_visible = False
+      for prop_value in props.values():
+        p_vis, _ = get_visibility(prop_value, operation)
+        if p_vis != "omit":
+          has_visible = True
+          break
+      if not has_visible:
+        return True
+
+  return False
+
+
 def has_ucp_annotations(data: Any) -> bool:
   """Checks if schema contains any ucp_* annotations."""
   if isinstance(data, dict):
@@ -119,8 +141,8 @@ def validate_ucp_annotations(data: Any, path: str = "") -> list[str]:
 # --- Pass 1: Collect annotated schemas ---
 
 
-def collect_annotated_schemas(source_dir: str) -> dict[str, bool]:
-  """Walks source dir and returns dict of absolute paths -> is_shared_request."""
+def collect_annotated_schemas(source_dir: str) -> dict[str, dict[str, Any]]:
+  """Walks source dir and returns dict of absolute paths -> info."""
   annotated = {}
   for root, _, files in os.walk(source_dir):
     for filename in files:
@@ -134,7 +156,16 @@ def collect_annotated_schemas(source_dir: str) -> dict[str, bool]:
             if isinstance(data, dict)
             else False
         )
-        annotated[os.path.normpath(filepath)] = is_shared
+        omitted_ops = set()
+        if not is_shared:
+          for op in REQUEST_OPERATIONS:
+            if is_operation_omitted(data, op):
+              omitted_ops.add(op)
+        
+        annotated[os.path.normpath(filepath)] = {
+            "is_shared": is_shared,
+            "omitted_ops": omitted_ops
+        }
   return annotated
 
 
@@ -144,7 +175,7 @@ def collect_annotated_schemas(source_dir: str) -> dict[str, bool]:
 def rewrite_ref(
     ref: str,
     current_file: str,
-    annotated_schemas: dict[str, bool],
+    annotated_schemas: dict[str, dict[str, Any]],
     operation: Optional[str],
 ) -> str:
   """Rewrites $ref if target is an annotated schema.
@@ -157,7 +188,7 @@ def rewrite_ref(
   Args:
     ref: The $ref value.
     current_file: Absolute path of file containing the ref.
-    annotated_schemas: Dict of paths to annotated schemas -> is_shared_request.
+    annotated_schemas: Dict of paths to annotated schemas -> info.
     operation: Request operation ('create' or 'update') or None for response.
 
   Returns:
@@ -167,7 +198,13 @@ def rewrite_ref(
   if target_path is None or target_path not in annotated_schemas:
     return ref  # Internal ref, external URL, or non-annotated file
 
-  is_shared = annotated_schemas[target_path]
+  info = annotated_schemas[target_path]
+  is_shared = info["is_shared"]
+  omitted_ops = info["omitted_ops"]
+
+  # Don't rewrite if target op is omitted
+  if operation and operation in omitted_ops and not is_shared:
+    return ref
 
   # Split ref into file and anchor parts
   parts = ref.split("#")
@@ -191,7 +228,7 @@ def transform_schema(
     data: Any,
     operation: Optional[str],
     current_file: str,
-    annotated_schemas: dict[str, bool],
+    annotated_schemas: dict[str, dict[str, Any]],
     title_suffix: str = "",
 ) -> Any:
   """Transforms schema for a specific operation (or response if None).
@@ -306,7 +343,7 @@ def process_openapi_schema_schema(
     source_path: str,
     dest_dir: str,
     rel_path: str,
-    annotated_schemas: dict[str, bool],
+    annotated_schemas: dict[str, dict[str, Any]],
 ) -> tuple[list[str], list[str]]:
   """Processes schema file. Returns (generated_paths, validation_errors)."""
   data = schema_utils.load_json(source_path)
@@ -323,7 +360,9 @@ def process_openapi_schema_schema(
   source_path_norm = os.path.normpath(source_path)
 
   if source_path_norm in annotated_schemas:
-    is_shared = annotated_schemas[source_path_norm]
+    info = annotated_schemas[source_path_norm]
+    is_shared = info["is_shared"]
+    omitted_ops = info["omitted_ops"]
 
     # Generate request schemas
     if is_shared:
@@ -342,6 +381,9 @@ def process_openapi_schema_schema(
     else:
       # Generate per-operation request schemas
       for op in REQUEST_OPERATIONS:
+        if op in omitted_ops:
+          continue
+
         out_name = f"{stem}.{op}_req.json"
         out_path = os.path.join(dest_dir, dir_path, out_name)
         suffix = f" {op.capitalize()} Request"
@@ -380,7 +422,7 @@ def process_openapi_schema_schema(
 # =============================================================================
 
 def process_openapi_schema(
-    source_path: str, dest_path: str, annotated_schemas: dict[str, bool]
+    source_path: str, dest_path: str, annotated_schemas: dict[str, dict[str, Any]]
 ) -> None:
   """Splits components and converts refs. Preserves absolute URLs if present."""
   spec = schema_utils.load_json(source_path)
@@ -405,7 +447,9 @@ def process_openapi_schema(
         break
 
     if found_path:
-      is_shared = annotated_schemas[found_path]
+      info = annotated_schemas[found_path]
+      is_shared = info["is_shared"]
+      omitted_ops = info["omitted_ops"]
 
       # 2. Calculate the base for the new $ref
       # If the original ref was a URL, keep it a URL.
@@ -429,18 +473,20 @@ def process_openapi_schema(
             f"#/components/schemas/{req_comp}"
         )
       else:
-        create_comp = f"{name}_create_request"
-        schemas[create_comp] = {"$ref": f"{base_ref}.create_req.json"}
+        if "create" not in omitted_ops:
+          create_comp = f"{name}_create_request"
+          schemas[create_comp] = {"$ref": f"{base_ref}.create_req.json"}
+          req_refs["create"] = f"#/components/schemas/{create_comp}"
 
-        update_comp = f"{name}_update_request"
-        schemas[update_comp] = {"$ref": f"{base_ref}.update_req.json"}
+        if "update" not in omitted_ops:
+          update_comp = f"{name}_update_request"
+          schemas[update_comp] = {"$ref": f"{base_ref}.update_req.json"}
+          req_refs["update"] = f"#/components/schemas/{update_comp}"
 
-        complete_comp = f"{name}_complete_request"
-        schemas[complete_comp] = {"$ref": f"{base_ref}.complete_req.json"}
-
-        req_refs["create"] = f"#/components/schemas/{create_comp}"
-        req_refs["update"] = f"#/components/schemas/{update_comp}"
-        req_refs["complete"] = f"#/components/schemas/{complete_comp}"
+        if "complete" not in omitted_ops:
+          complete_comp = f"{name}_complete_request"
+          schemas[complete_comp] = {"$ref": f"{base_ref}.complete_req.json"}
+          req_refs["complete"] = f"#/components/schemas/{complete_comp}"
 
       # 4. Map Old -> New and Delete
       ref_map[f"#/components/schemas/{name}"] = {
@@ -491,7 +537,7 @@ def process_openapi_schema(
 # =============================================================================
 
 def process_openrpc_schema(
-    source_path: str, dest_path: str, annotated_schemas: dict[str, bool]
+    source_path: str, dest_path: str, annotated_schemas: dict[str, dict[str, Any]]
 ) -> None:
   """Rewrites refs in OpenRPC methods to use operation-specific schemas."""
   spec = schema_utils.load_json(source_path)
@@ -514,7 +560,14 @@ def process_openrpc_schema(
             break
 
         if found_path:
-          is_shared = annotated_schemas[found_path]
+          info = annotated_schemas[found_path]
+          is_shared = info["is_shared"]
+          omitted_ops = info["omitted_ops"]
+          
+          # Don't rewrite if target op is omitted
+          if operation in omitted_ops and not is_shared:
+             return schema
+
           # Rewrite the ref to point to the operation-specific schema
           if ref.startswith("http:") or ref.startswith("https:"):
             base_ref, ext = ref.rsplit(".", 1) if "." in ref else (ref, "json")
