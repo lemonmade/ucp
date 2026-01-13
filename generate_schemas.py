@@ -339,6 +339,19 @@ def write_json(data: dict[str, Any], path: str) -> None:
     f.write("\n")
 
 
+def is_schema_meaningful(schema: dict[str, Any]) -> bool:
+  """Check if a transformed schema has meaningful content.
+  
+  A schema is considered meaningful if it has at least one property.
+  """
+  if not isinstance(schema, dict):
+    return False
+  
+  # Check if there are any properties defined
+  props = schema.get("properties", {})
+  return len(props) > 0
+
+
 def process_openapi_schema_schema(
     source_path: str,
     dest_dir: str,
@@ -374,10 +387,11 @@ def process_openapi_schema_schema(
       transformed = transform_schema(
           copy.deepcopy(data), "create", source_path, annotated_schemas, suffix
       )
-      if "$id" in transformed:
-        transformed["$id"] = transformed["$id"].replace(".json", "_req.json")
-      write_json(transformed, out_path)
-      generated.append(os.path.join(dir_path, out_name))
+      if is_schema_meaningful(transformed):
+        if "$id" in transformed:
+          transformed["$id"] = transformed["$id"].replace(".json", "_req.json")
+        write_json(transformed, out_path)
+        generated.append(os.path.join(dir_path, out_name))
     else:
       # Generate per-operation request schemas
       for op in REQUEST_OPERATIONS:
@@ -390,12 +404,14 @@ def process_openapi_schema_schema(
         transformed = transform_schema(
             copy.deepcopy(data), op, source_path, annotated_schemas, suffix
         )
-        if "$id" in transformed:
-          transformed["$id"] = transformed["$id"].replace(
-              ".json", f".{op}_req.json"
-          )
-        write_json(transformed, out_path)
-        generated.append(os.path.join(dir_path, out_name))
+        # Only write if the schema has meaningful content
+        if is_schema_meaningful(transformed):
+          if "$id" in transformed:
+            transformed["$id"] = transformed["$id"].replace(
+                ".json", f".{op}_req.json"
+            )
+          write_json(transformed, out_path)
+          generated.append(os.path.join(dir_path, out_name))
 
     # Generate response schema
     out_name = f"{stem}_resp.json"
@@ -465,28 +481,32 @@ def process_openapi_schema(
       resp_comp = f"{name}_response"
       schemas[resp_comp] = {"$ref": f"{base_ref}_resp.json"}
 
+      # Map source path to spec path for file existence checks
+      spec_base_dir = os.path.join(SPEC_DIR, os.path.relpath(
+          os.path.dirname(found_path), SOURCE_DIR
+      ))
+      spec_base_name = os.path.join(
+          spec_base_dir, os.path.basename(found_path).rsplit(".", 1)[0]
+      )
+
       req_refs = {}
       if is_shared:
-        req_comp = f"{name}_request"
-        schemas[req_comp] = {"$ref": f"{base_ref}_req.json"}
-        req_refs["create"] = req_refs["update"] = req_refs["complete"] = (
-            f"#/components/schemas/{req_comp}"
-        )
+        # Check if shared request file was generated
+        req_file = f"{spec_base_name}_req.json"
+        if os.path.exists(req_file):
+          req_comp = f"{name}_request"
+          schemas[req_comp] = {"$ref": f"{base_ref}_req.json"}
+          req_refs["create"] = req_refs["update"] = req_refs["complete"] = (
+              f"#/components/schemas/{req_comp}"
+          )
       else:
-        if "create" not in omitted_ops:
-          create_comp = f"{name}_create_request"
-          schemas[create_comp] = {"$ref": f"{base_ref}.create_req.json"}
-          req_refs["create"] = f"#/components/schemas/{create_comp}"
-
-        if "update" not in omitted_ops:
-          update_comp = f"{name}_update_request"
-          schemas[update_comp] = {"$ref": f"{base_ref}.update_req.json"}
-          req_refs["update"] = f"#/components/schemas/{update_comp}"
-
-        if "complete" not in omitted_ops:
-          complete_comp = f"{name}_complete_request"
-          schemas[complete_comp] = {"$ref": f"{base_ref}.complete_req.json"}
-          req_refs["complete"] = f"#/components/schemas/{complete_comp}"
+        # Check each operation file
+        for op in REQUEST_OPERATIONS:
+          op_file = f"{spec_base_name}.{op}_req.json"
+          if os.path.exists(op_file):
+            op_comp = f"{name}_{op}_request"
+            schemas[op_comp] = {"$ref": f"{base_ref}.{op}_req.json"}
+            req_refs[op] = f"#/components/schemas/{op_comp}"
 
       # 4. Map Old -> New and Delete
       ref_map[f"#/components/schemas/{name}"] = {
@@ -544,7 +564,7 @@ def process_openrpc_schema(
   if not spec or "methods" not in spec:
     return
 
-  source_dir_abs = os.path.dirname(os.path.abspath(source_path))
+  dest_dir = os.path.dirname(dest_path)
 
   def rewrite_schema_ref(schema: Any, operation: str) -> Any:
     """Recursively rewrite $refs in schema based on operation type."""
@@ -571,19 +591,35 @@ def process_openrpc_schema(
           # Rewrite the ref to point to the operation-specific schema
           if ref.startswith("http:") or ref.startswith("https:"):
             base_ref, ext = ref.rsplit(".", 1) if "." in ref else (ref, "json")
+            # Can't check file existence for URLs, so generate the ref anyway
+            if operation in REQUEST_OPERATIONS:
+              if is_shared:
+                new_ref = f"{base_ref}_req.{ext}"
+              else:
+                new_ref = f"{base_ref}.{operation}_req.{ext}"
+            else:
+              new_ref = f"{base_ref}_resp.{ext}"
+            return {**schema, "$ref": new_ref}
           else:
             base_ref, ext = os.path.splitext(ref)
             ext = ext[1:] if ext.startswith(".") else ext
 
-          if operation in ["create", "update", "complete"]:
-            if is_shared:
-              new_ref = f"{base_ref}_req.{ext}"
+            if operation in REQUEST_OPERATIONS:
+              if is_shared:
+                new_ref = f"{base_ref}_req.{ext}"
+              else:
+                new_ref = f"{base_ref}.{operation}_req.{ext}"
             else:
-              new_ref = f"{base_ref}.{operation}_req.{ext}"
-          else:
-            new_ref = f"{base_ref}_resp.{ext}"
+              new_ref = f"{base_ref}_resp.{ext}"
 
-          return {**schema, "$ref": new_ref}
+            # Check if the target file exists
+            target_file = os.path.normpath(
+                os.path.join(dest_dir, new_ref)
+            )
+            if os.path.exists(target_file):
+              return {**schema, "$ref": new_ref}
+            # If file doesn't exist, keep original ref
+            return schema
 
       # Recursively process nested schemas
       return {k: rewrite_schema_ref(v, operation) for k, v in schema.items()}
@@ -625,7 +661,9 @@ def process_openrpc_schema(
 # =============================================================================
 
 
-def rewrite_refs_for_ecp(data: Any, annotated_schemas: set[str]) -> Any:
+def rewrite_refs_for_ecp(
+    data: Any, annotated_schemas: set[str], spec_schemas_dir: str
+) -> Any:
   """Rewrite $refs in ECP methods to point to spec/ schema paths.
 
   Source embedded.json uses refs like ../../schemas/shopping/checkout.json
@@ -634,6 +672,7 @@ def rewrite_refs_for_ecp(data: Any, annotated_schemas: set[str]) -> Any:
   Args:
     data: Schema data to rewrite refs for.
     annotated_schemas: Set of annotated schema paths.
+    spec_schemas_dir: Directory where spec schemas are located for existence checks.
 
   Returns:
     Schema data with rewritten refs.
@@ -654,22 +693,27 @@ def rewrite_refs_for_ecp(data: Any, annotated_schemas: set[str]) -> Any:
             if schema_path in annotated_schemas and schema_path.endswith(
                 ".json"
             ):
-              schema_path = schema_path[:-5] + "_resp.json"
+              new_schema_path = schema_path[:-5] + "_resp.json"
+              # Check if the target file exists
+              target_file = os.path.join(spec_schemas_dir, new_schema_path)
+              if os.path.exists(target_file):
+                schema_path = new_schema_path
+              # If not, keep original (it will be a non-annotated schema or inline)
             result[k] = f"../../schemas/shopping/{schema_path}{anchor_part}"
           else:
             result[k] = v
         else:
           result[k] = v
       else:
-        result[k] = rewrite_refs_for_ecp(v, annotated_schemas)
+        result[k] = rewrite_refs_for_ecp(v, annotated_schemas, spec_schemas_dir)
     return result
   elif isinstance(data, list):
-    return [rewrite_refs_for_ecp(item, annotated_schemas) for item in data]
+    return [rewrite_refs_for_ecp(item, annotated_schemas, spec_schemas_dir) for item in data]
   return data
 
 
 def transform_ecp_method(
-    method: dict[str, Any], annotated_schemas: set[str]
+    method: dict[str, Any], annotated_schemas: set[str], spec_schemas_dir: str
 ) -> dict[str, Any]:
   """Transform an ECP method definition to OpenRPC format."""
   openrpc_method = {
@@ -685,7 +729,7 @@ def transform_ecp_method(
       openrpc_param = {
           "name": param["name"],
           "required": param.get("required", False),
-          "schema": rewrite_refs_for_ecp(param["schema"], annotated_schemas),
+          "schema": rewrite_refs_for_ecp(param["schema"], annotated_schemas, spec_schemas_dir),
       }
       if "description" in param.get("schema", {}):
         openrpc_param["description"] = param["schema"]["description"]
@@ -695,7 +739,7 @@ def transform_ecp_method(
     result = method["result"]
     openrpc_method["result"] = {
         "name": result.get("name", "result"),
-        "schema": rewrite_refs_for_ecp(result["schema"], annotated_schemas),
+        "schema": rewrite_refs_for_ecp(result["schema"], annotated_schemas, spec_schemas_dir),
     }
 
   if "errors" in method:
@@ -723,6 +767,9 @@ def generate_ecp_spec(annotated_schemas: set[str]) -> int:
   ep_title = "Embedded Protocol"
   ep_description = "Embedded Protocol methods for UCP capabilities."
 
+  # Spec output directory for checking file existence
+  spec_schemas_dir = os.path.join(SPEC_DIR, "schemas/shopping")
+
   # Collect core methods from embedded.json
   if os.path.exists(ECP_SOURCE_FILE):
     with open(ECP_SOURCE_FILE, "r", encoding="utf-8") as f:
@@ -731,7 +778,7 @@ def generate_ecp_spec(annotated_schemas: set[str]) -> int:
     ep_description = data.get("description", ep_description)
     if "methods" in data:
       for method in data["methods"]:
-        methods.append(transform_ecp_method(method, annotated_schemas))
+        methods.append(transform_ecp_method(method, annotated_schemas, spec_schemas_dir))
     if "delegations" in data:
       delegations.extend(data["delegations"])
     print(f"  From embedded.json: {len(methods)} methods")
@@ -752,7 +799,7 @@ def generate_ecp_spec(annotated_schemas: set[str]) -> int:
       embedded_block = data["embedded"]
       if "methods" in embedded_block:
         for method in embedded_block["methods"]:
-          methods.append(transform_ecp_method(method, annotated_schemas))
+          methods.append(transform_ecp_method(method, annotated_schemas, spec_schemas_dir))
           ext_count += 1
       if "delegations" in embedded_block:
         delegations.extend(embedded_block["delegations"])
