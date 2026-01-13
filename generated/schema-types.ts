@@ -660,7 +660,7 @@ export declare interface Consent {
  * Base checkout schema. Extensions compose onto this using allOf.
  */
 export declare interface CheckoutCompleteRequest {
-  payment: PaymentCompleteRequest;
+  payment?: PaymentCompleteRequest;
   /**
    * Key-value pairs of risk signals.
    */

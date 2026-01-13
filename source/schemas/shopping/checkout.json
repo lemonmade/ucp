@@ -112,11 +112,7 @@
     },
     "payment": {
       "$ref": "payment.json",
-      "ucp_request": {
-        "create": "optional",
-        "update": "optional",
-        "complete": "required"
-      }
+      "ucp_request": "optional"
     },
     "order": {
       "$ref": "types/order_confirmation.json",
