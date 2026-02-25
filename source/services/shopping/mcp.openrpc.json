@@ -115,7 +115,12 @@
       ],
       "result": {
         "name": "checkout",
-        "schema": {"$ref": "../../schemas/shopping/checkout.json"}
+        "schema": {
+          "oneOf": [
+            { "$ref": "../../schemas/shopping/checkout.json" },
+            { "$ref": "../../schemas/shopping/checkout_error.json" }
+          ]
+        }
       }
     },
     {
